@@ -13,6 +13,7 @@ import (
 
 	"github.com/urfave/negroni"
 	"github.com/yosssi/ace"
+	gmux "github.com/gorilla/mux"
   )
 
 type Book struct {
@@ -46,13 +47,14 @@ func verifyDatabase(w http.ResponseWriter, r *http.Request, next http.HandlerFun
 func main() {
 	db, _ = sql.Open("sqlite3", "dev.db")
 
-	mux := http.NewServeMux()
+	mux := gmux.NewRouter()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// using ace template engine
 		template, err := ace.Load("templates/index", "", nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
 		}
 
 		p := Page{Books: []Book{}}
@@ -66,34 +68,37 @@ func main() {
 		if err = template.Execute(w, p); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
+	}).Methods("GET")
 
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		var results []SearchResult 
 		var err error
 
 		if results, err = search(r.FormValue("search")); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
 		}
 
 		encoder := json.NewEncoder(w)
 		if err := encoder.Encode(results); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
+	}).Methods("POST")
 
-	mux.HandleFunc("/books/add", func (w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/books", func (w http.ResponseWriter, r *http.Request) {
 		var book ClassifyBookResponse
 		var err error
 
 		if book, err = find(r.FormValue("id")); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
 		}
 
 		result, err := db.Exec("insert into books (pk, title, author, id, classification) values (?, ?, ?, ?, ?)", nil, book.BookData.Title, book.BookData.Author, book.BookData.ID, book.Classification.MostPopular)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
 		}
 
 		pk, _ := result.LastInsertId()
@@ -106,7 +111,15 @@ func main() {
 		if err := json.NewEncoder(w).Encode(b); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-	})
+	}).Methods("PUT")
+
+	mux.HandleFunc("/books/{pk}", func (w http.ResponseWriter, r *http.Request) {
+		if _, err := db.Exec("delete from books where pk = ?", gmux.Vars(r)["pk"]); err != nil {
+      http.Error(w, err.Error(), http.StatusInternalServerError)
+      return
+    }
+    w.WriteHeader(http.StatusOK)
+	}).Methods("DELETE")
 	
 	// implementing negroni middleware
 	n := negroni.Classic()
